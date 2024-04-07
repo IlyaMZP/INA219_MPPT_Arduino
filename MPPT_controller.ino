@@ -105,7 +105,7 @@ int16_t find_mppt_ic(measurement_t last_measurement, measurement_t measurement) 
   } else {
     float incremental_conductance = dI/dU;
     float instantaneous_conductance = -measurement.current/measurement.voltage;
-    if (fabsf(incremental_conductance + instantaneous_conductance) <= 0.001f) {
+    if (fabsf(incremental_conductance - instantaneous_conductance) <= 0.001f) {
       return 0;
     } else if ((incremental_conductance - instantaneous_conductance) >= 0.001f) {
       return -pwm_step;
@@ -113,4 +113,5 @@ int16_t find_mppt_ic(measurement_t last_measurement, measurement_t measurement) 
       return pwm_step;
     }
   }
+  return 0; // This shouldn't be reachable?
 }
