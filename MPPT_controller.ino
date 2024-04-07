@@ -6,7 +6,10 @@ Adafruit_INA219 ina219;
 #define upper_limit 180  // Upper PWM limit for boost converter
 #define lower_limit 2    // Lower PWM limit  for boost converter
 #define power_min_mw 50  // Minimum power level before reset
-#define mppt_function find_mppt_po // find_mppt_po (Perturb and observe) or find_mppt_ic (Incremental conductance)
+
+int16_t find_mppt_po(measurement_t, measurement_t);
+int16_t find_mppt_ic(measurement_t, measurement_t);
+int16_t (*find_mppt[2]) (measurement_t, measurement_t) = {find_mppt_po, find_mppt_ic};
 
 struct measurement_t {
   float voltage;
@@ -37,12 +40,23 @@ measurement_t measure(measurement_t measurement) {
   return measurement;
 }
 
+uint8_t algorithm = 0;  // Default algorithm (Perturb and observe)
+
 void loop() {
+  if (Serial.available() != 0) {
+    char c = Serial.read();
+    if (c == 'p') {  // Perturb and observe
+      algorithm = 0;
+    }
+    if (c == 'i') {  // Incremental conductance
+      algorithm = 1;
+    }
+  }
   if (measurement.power >= power_min_mw) {
       power_good_timestamp = millis();
   }
   measurement = measure(measurement);
-  int16_t adjustment = mppt_function(last_measurement, measurement);
+  int16_t adjustment = find_mppt[algorithm](last_measurement, measurement);
   last_measurement = measurement;
   measurement.duty_cycle = constrain(last_measurement.duty_cycle+adjustment, lower_limit, upper_limit);
   
@@ -63,7 +77,7 @@ void loop() {
   }
   #endif
   if (millis() - power_good_timestamp >= 10000) { // Reset if we didn't have good power
-      measurement.duty_cycle = 15;                             // for more than 10 seconds
+      measurement.duty_cycle = 15;                // for more than 10 seconds
       power_good_timestamp = millis();
   }
 }
