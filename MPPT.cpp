@@ -8,18 +8,6 @@ MPPT::MPPT(MPPT_Algorithm algorithm, uint16_t lower_limit, uint16_t upper_limit,
   _current_max = current_max;
 }
 
-void MPPT::set_voltage(float voltage) {
-  _measurement.voltage = voltage;
-}
-
-void MPPT::set_current(float current) {
-  _measurement.current = current;
-}
-
-void MPPT::set_power(float power) {
-  _measurement.power = power;
-}
-
 void MPPT::set_algorithm(MPPT_Algorithm algorithm) {
   _mppt_algorithm = algorithm;
 }
@@ -28,7 +16,52 @@ void MPPT::set_current_limit(float current_max) {
   _current_max = current_max;
 }
 
+void MPPT::set_measurement_callback(measurement_callback_t callback) {
+  _measurement_callback = callback;
+}
+
+void MPPT::set_duty_cycle_callback(dc_callback_t callback) {
+  _dc_callback = callback;
+}
+
+void MPPT::sweep(uint32_t sample_delay) {
+  // FIXME: There is no current limit in sweep
+  if (!_dc_callback) {
+    // Sweep can only be done if we can set duty cycle.
+    return;
+  }
+  uint16_t max_dc = 0;
+  float max_p = 0.0f;
+  measurement_t sweep_measurement;
+  for (uint16_t dc = _lower_limit; dc <= _upper_limit; dc += _pwm_step) {
+    _dc_callback(dc);
+    delay(sample_delay);
+    _measurement_callback(&sweep_measurement);
+    if (sweep_measurement.power > max_p) {
+      max_p = sweep_measurement.power;
+      max_dc = dc;
+      // Just so our mppt algorithm doesn't freak out when we return
+      // Let's update the internal measurement state
+      _measurement = sweep_measurement;
+    }
+  }
+
+  _measurement.duty_cycle = max_dc;
+  _last_measurement = _measurement;
+  _dc_callback(_measurement.duty_cycle);
+  // Wait for voltage to stabilize again before returning
+  delay(sample_delay);
+}
+
 void MPPT::update() {
+  if (!_measurement_callback) {
+    return;
+  }
+  // I have trust issues
+  uint16_t _saved_dc = _measurement.duty_cycle;
+  _measurement_callback(&_measurement);
+  _measurement.duty_cycle = _saved_dc;
+
   int16_t adjustment = 0;
   switch (_mppt_algorithm) {
     case PERTURB_AND_OBSERVE:
@@ -40,9 +73,12 @@ void MPPT::update() {
   }
   _last_measurement = _measurement;
   if (_measurement.current >= _current_max) {
-      adjustment = -pwm_step;
+      adjustment = -_pwm_step;
   }
   _measurement.duty_cycle = constrain((int32_t)_last_measurement.duty_cycle + adjustment, _lower_limit, _upper_limit);
+  if (_dc_callback) {
+    _dc_callback(_measurement.duty_cycle);
+  }
 }
 
 void MPPT::reset(uint16_t duty_cycle = 15) {
